@@ -1,0 +1,6 @@
+pydantic>=2.7.0,<3
+semantic-kernel
+pydantic-settings
+python-dotenv
+requests # For Twilio plugins
+twilio   # For Twilio plugins 

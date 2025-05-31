@@ -1,0 +1,16 @@
+# ADK Core library
+google-adk
+
+# For Gemini models (via Vertex AI typically) or other model providers through LiteLLM
+# google-cloud-aiplatform # If using Vertex AI directly for Gemini
+# litellm # If using a wide range of models
+
+# For .env file support
+python-dotenv
+
+# For Twilio tools
+twilio
+
+# Optional: for local ADK web UI and CLI interaction
+# uvicorn # For running ADK web UI
+# click # For ADK CLI features 
