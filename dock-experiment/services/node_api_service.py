@@ -5,6 +5,11 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# --- Authentication State ---
+# This is a simple in-memory store for the auth token.
+# In a real-world multi-user scenario, this would be handled by a more robust session management system.
+AUTH_TOKEN = None
+
 # Attempt to get API_BASE_URL from environment variable, otherwise use a default
 API_BASE_URL = os.getenv("API_BASE_URL")
 if not API_BASE_URL:
@@ -16,6 +21,14 @@ COMMON_HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json"
 }
+
+def _get_auth_headers():
+    """Helper to get headers, including auth if available."""
+    headers = COMMON_HEADERS.copy()
+    if AUTH_TOKEN:
+        # Per the workaround, the token is sent directly without the "Bearer" prefix.
+        headers["Authorization"] = AUTH_TOKEN
+    return headers
 
 def _handle_response(response: requests.Response, endpoint_name: str):
     """Helper function to handle API responses."""
@@ -43,6 +56,44 @@ def _handle_response(response: requests.Response, endpoint_name: str):
     except json.JSONDecodeError as json_err:
         logger.error(f"Failed to decode JSON response from {endpoint_name}: {json_err} - Response: {response.text}")
         return {"error": True, "message": f"Invalid JSON response from API for {endpoint_name}.", "details": response.text}
+
+
+def login(email: str, password: str) -> dict:
+    """Calls the Node.js API to log in a user and stores the auth token."""
+    global AUTH_TOKEN
+    endpoint = f"{API_BASE_URL}/auth/login"
+    payload = {"email": email, "password": password}
+    logger.info(f"Calling API: POST {endpoint} for user login.")
+    try:
+        response = requests.post(endpoint, json=payload, headers=COMMON_HEADERS, timeout=15)
+        result = _handle_response(response, "login")
+        if not result.get("error") and result.get("_token"):
+            AUTH_TOKEN = result["_token"]
+            logger.info(f"Login successful. Auth token stored for user.")
+            # Return a user-friendly message, excluding the token itself for security.
+            return {"success": True, "message": "Login successful.", "user": result.get("user")}
+        elif not result.get("error"):
+            logger.warning(f"Login response did not contain a '_token'. Response: {result}")
+            return {"error": True, "message": "Login successful, but no authentication token was received."}
+        else:
+            AUTH_TOKEN = None # Clear any previous token on failed login
+            return result
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout calling {endpoint}")
+        return {"error": True, "message": "API request timed out for login."}
+
+def get_user_profile() -> dict:
+    """Calls the Node.js API to get the current user's profile using the stored auth token."""
+    if not AUTH_TOKEN:
+        return {"error": True, "message": "You must be logged in to perform this action."}
+    endpoint = f"{API_BASE_URL}/users/me"
+    logger.info(f"Calling API: GET {endpoint} for user profile.")
+    try:
+        response = requests.get(endpoint, headers=_get_auth_headers(), timeout=10)
+        return _handle_response(response, "get_user_profile")
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout calling {endpoint}")
+        return {"error": True, "message": "API request timed out for get_user_profile."}
 
 
 def fetch_vehicle_specs(vin: str) -> dict:
@@ -124,6 +175,57 @@ def fetch_quote_details(quote_id: str) -> dict:
     except requests.exceptions.Timeout:
         logger.error(f"Timeout calling {endpoint}")
         return {"error": True, "message": "API request timed out for fetch_quote_details."}
+
+def search_trucking_orders(search_query: str = None, limit: int = 10, page: int = 1) -> dict:
+    """Calls the Node.js API to search a user's trucking orders."""
+    if not AUTH_TOKEN:
+        return {"error": True, "message": "You must be logged in to perform this action."}
+    endpoint = f"{API_BASE_URL}/trucking"
+    params = {"limit": limit, "page": page}
+    if search_query:
+        params["search"] = search_query
+    logger.info(f"Calling API: GET {endpoint} with params: {params}")
+    try:
+        response = requests.get(endpoint, params=params, headers=_get_auth_headers(), timeout=15)
+        return _handle_response(response, "search_trucking_orders")
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout calling {endpoint}")
+        return {"error": True, "message": "API request timed out for search_trucking_orders."}
+
+def search_bookings(search_query: str = None, type_vehicle: str = None, type_shipping: str = None, done: bool = None, limit: int = 10, page: int = 1) -> dict:
+    """Calls the Node.js API for advanced search of a user's bookings."""
+    if not AUTH_TOKEN:
+        return {"error": True, "message": "You must be logged in to perform this action."}
+    endpoint = f"{API_BASE_URL}/booking"
+    params = {"limit": limit, "page": page}
+    if search_query:
+        params["search"] = search_query
+    if type_vehicle:
+        params["typeVehicle"] = type_vehicle
+    if type_shipping:
+        params["typeShipping"] = type_shipping
+    if done is not None:
+        params["done"] = str(done).lower()
+    logger.info(f"Calling API: GET {endpoint} with params: {params}")
+    try:
+        response = requests.get(endpoint, params=params, headers=_get_auth_headers(), timeout=15)
+        return _handle_response(response, "search_bookings")
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout calling {endpoint}")
+        return {"error": True, "message": "API request timed out for search_bookings."}
+
+def create_trucking_order(payload: dict) -> dict:
+    """Calls the Node.js API to convert a quote into a booked order."""
+    if not AUTH_TOKEN:
+        return {"error": True, "message": "You must be logged in to book a shipment."}
+    endpoint = f"{API_BASE_URL}/trucking"
+    logger.info(f"Calling API: POST {endpoint} to create an order.")
+    try:
+        response = requests.post(endpoint, json=payload, headers=_get_auth_headers(), timeout=20)
+        return _handle_response(response, "create_trucking_order")
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout calling {endpoint}")
+        return {"error": True, "message": "API request timed out for create_trucking_order."}
 
 # Example of how to test one of these functions directly (for development)
 if __name__ == '''__main__''':

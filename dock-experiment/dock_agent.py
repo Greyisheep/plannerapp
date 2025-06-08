@@ -10,6 +10,8 @@ load_dotenv()
 # Import your tools
 from .tools import vehicle_tools
 from .tools import quoting_tools
+from .tools import user_tools
+from .tools import shipment_tools
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -28,35 +30,56 @@ get_vehicle_years_tool = FunctionTool(func=vehicle_tools.get_vehicle_years_for_m
 get_price_quote_tool = FunctionTool(func=quoting_tools.get_trucking_price_quote)
 get_quote_details_tool = FunctionTool(func=quoting_tools.get_quote_details_by_id)
 
+# New User and Shipment Tools
+login_tool = FunctionTool(func=user_tools.login_user)
+get_profile_tool = FunctionTool(func=user_tools.get_current_user_profile)
+search_shipments_tool = FunctionTool(func=shipment_tools.search_user_shipments)
+search_bookings_advanced_tool = FunctionTool(func=shipment_tools.search_user_bookings_advanced)
+book_shipment_tool = FunctionTool(func=shipment_tools.book_shipment_order)
+
 all_tools = [
     get_vehicle_specs_tool,
     get_vehicle_makes_tool,
     get_vehicle_models_tool,
     get_vehicle_years_tool,
     get_price_quote_tool,
-    get_quote_details_tool
+    get_quote_details_tool,
+    login_tool,
+    get_profile_tool,
+    search_shipments_tool,
+    search_bookings_advanced_tool,
+    book_shipment_tool
 ]
 logger.info(f"{len(all_tools)} tools initialized.")
 
 # --- Define Agent Instruction --- 
 agent_instruction = (
     "You are DockMind, a specialized AI assistant for vehicle information and shipping logistics. "
-    "Your primary functions are to help users look up vehicle specifications using a VIN, "
-    "find vehicle makes, models, and years, and provide trucking price quotes. "
-    "You can also retrieve details of a previously generated quote using a quote ID.\n\n"
-    "When a user asks for information, first determine if one of your specialized tools can fulfill the request. "
-    "Your available tools are:\n"
-    "- get_vehicle_specs_by_vin: Use this to get detailed specs for a car if the user provides a VIN.\n"
-    "- get_vehicle_makes_for_year: Use this if a user wants to know car makes available for a specific year.\n"
-    "- get_vehicle_models_for_make_year: Use this if a user provides a car make and year and wants to see models.\n"
-    "- get_vehicle_years_for_make_model: Use this if a user provides a car make and model and wants to know available years.\n"
-    "- get_trucking_price_quote: Use this to calculate a shipping quote. You will need origin (city, state, zip, country), "
-    "  destination (city, state, zip, country), and vehicle details (year, make, model, type, operable status). Collect all necessary details before calling.\n"
-    "- get_quote_details_by_id: Use this if a user provides a quote ID and wants to see its details.\n\n"
-    "If a tool is appropriate, clearly state you are using a tool and then output the function call. "
-    "If the user's query is outside these functions (e.g., general chit-chat, or a request you cannot fulfill with these tools), "
-    "respond politely and indicate the limits of your current capabilities. "
-    "Always present tool results clearly to the user. If a tool call results in an error, inform the user clearly about the error."
+    "You have two main roles: an anonymous Quoting Assistant and a personalized Booking and Tracking Assistant.\n\n"
+    
+    "--- CORE CAPABILITIES ---\n"
+    "1.  **Vehicle Information:** Look up vehicle specs by VIN, and find makes, models, and years.\n"
+    "2.  **Price Quotes:** Provide trucking price quotes based on origin, destination, and vehicle details.\n"
+    "3.  **User Accounts:** Allow users to log in to access personalized services.\n"
+    "4.  **Shipment Tracking:** Search a logged-in user's shipment history and check their status.\n"
+    "5.  **Booking:** Guide a logged-in user through the process of booking a shipment after they receive a quote.\n\n"
+
+    "--- INTERACTION FLOW ---\n"
+    "**Anonymous/Public Users (Not Logged In):**\n"
+    "- You can provide vehicle information (`get_vehicle_*` tools).\n"
+    "- You can generate a price quote (`get_trucking_price_quote`).\n"
+    "- If a user asks to book a shipment or view their history, you MUST instruct them to log in first. Use the `login_user` tool.\n\n"
+
+    "**Logged-In Users:**\n"
+    "- **Personalization:** Greet them by name if possible. You can fetch their profile with `get_current_user_profile`.\n"
+    "- **Shipment History:** Use `search_user_shipments` for simple searches or `search_user_bookings_advanced` for more detailed queries (e.g., by status).\n"
+    "- **Booking Workflow:**\n"
+    "    1. After providing a quote with `get_trucking_price_quote`, ask the user if they want to book it.\n"
+    "    2. If they say yes, confirm they are logged in. (If you aren't sure, you can use `get_current_user_profile` and check for an error).\n"
+    "    3. To book, you MUST use the `book_shipment_order` tool. You will need to gather all the parameters required by the tool. Many of these will be available from the quoting process.\n"
+    "    4. **IMPORTANT:** The final booking step might fail due to an external partner system. If you use `book_shipment_order` and do NOT get an error, respond with a confirmation message like: 'Your booking request has been successfully submitted to our system. You will receive an email confirmation from our team as soon as it is processed by our logistics partner. Your order ID is [orderId_from_response].'\n\n"
+    
+    "Always be polite and clear. If you need information, ask for it. If a tool fails, clearly state the error to the user."
 )
 
 # --- Define the LLM Agent (Globally) ---
@@ -105,4 +128,7 @@ if __name__ == "__main__":
         logger.info("- What are the specs for VIN 1HGCM82633A123456?")
         logger.info("- What vehicle makes are available for the year 2022?")
         logger.info("- Get me a trucking quote from Los Angeles, CA, 90001, USA to Newark, NJ, 07101, USA for a 2021 Honda CRV.")
-        logger.info("- What are the details for quote ID fe7b062b-e33a-4205-9dd3-1ac9404bb4f6?") 
+        logger.info("- What are the details for quote ID fe7b062b-e33a-4205-9dd3-1ac9404bb4f6?")
+        logger.info("- Please log me in. My email is user@example.com and my password is 'password'.")
+        logger.info("- Who am I logged in as?")
+        logger.info("- Show me my past shipments.") 
