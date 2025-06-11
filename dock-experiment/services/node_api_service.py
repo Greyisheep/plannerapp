@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 # This is a simple in-memory store for the auth token.
 # In a real-world multi-user scenario, this would be handled by a more robust session management system.
 AUTH_TOKEN = None
+CURRENT_USER = None
 
 # Attempt to get API_BASE_URL from environment variable, otherwise use a default
 API_BASE_URL = os.getenv("API_BASE_URL")
@@ -47,9 +48,19 @@ def _handle_response(response: requests.Response, endpoint_name: str):
         try:
             # Try to parse error response if it's JSON
             error_details = response.json()
+            # Try to extract a more specific message if available
+            specific_message = error_details.get("message") or error_details.get("error")
+            if not specific_message:
+                 # Fallback for differently structured errors
+                if isinstance(error_details.get("data"), list) and error_details["data"]:
+                    specific_message = error_details["data"][0].get("message", "An API error occurred.")
+                else:
+                    specific_message = "An API error occurred."
+
+            return {"error": True, "message": specific_message, "details": error_details, "status_code": response.status_code}
         except json.JSONDecodeError:
             error_details = response.text
-        return {"error": True, "message": f"API request failed for {endpoint_name}: {http_err}", "details": error_details, "status_code": response.status_code}
+            return {"error": True, "message": f"API request failed for {endpoint_name}: {http_err}", "details": error_details, "status_code": response.status_code}
     except requests.exceptions.RequestException as req_err:
         logger.error(f"Request exception occurred calling {endpoint_name}: {req_err}")
         return {"error": True, "message": f"Request failed for {endpoint_name}: {req_err}"}
@@ -60,23 +71,31 @@ def _handle_response(response: requests.Response, endpoint_name: str):
 
 def login(email: str, password: str) -> dict:
     """Calls the Node.js API to log in a user and stores the auth token."""
-    global AUTH_TOKEN
+    global AUTH_TOKEN, CURRENT_USER
     endpoint = f"{API_BASE_URL}/auth/login"
     payload = {"email": email, "password": password}
     logger.info(f"Calling API: POST {endpoint} for user login.")
     try:
         response = requests.post(endpoint, json=payload, headers=COMMON_HEADERS, timeout=15)
         result = _handle_response(response, "login")
-        if not result.get("error") and result.get("_token"):
-            AUTH_TOKEN = result["_token"]
+
+        # Based on Node.js app, token is nested in a 'data' object.
+        token = result.get("data", {}).get("_token")
+        
+        if not result.get("error") and token:
+            AUTH_TOKEN = token
             logger.info(f"Login successful. Auth token stored for user.")
-            # Return a user-friendly message, excluding the token itself for security.
-            return {"success": True, "message": "Login successful.", "user": result.get("user")}
+            
+            # The user object is also expected in the 'data' field
+            user_data = result.get("data", {}).get("user")
+            CURRENT_USER = user_data
+            return {"success": True, "message": "Login successful.", "user": user_data}
         elif not result.get("error"):
-            logger.warning(f"Login response did not contain a '_token'. Response: {result}")
+            logger.warning(f"Login response did not contain a '_token' in the 'data' field. Response: {result}")
             return {"error": True, "message": "Login successful, but no authentication token was received."}
         else:
             AUTH_TOKEN = None # Clear any previous token on failed login
+            CURRENT_USER = None
             return result
     except requests.exceptions.Timeout:
         logger.error(f"Timeout calling {endpoint}")
@@ -84,17 +103,29 @@ def login(email: str, password: str) -> dict:
 
 def get_user_profile() -> dict:
     """Calls the Node.js API to get the current user's profile using the stored auth token."""
+    global CURRENT_USER
     if not AUTH_TOKEN:
         return {"error": True, "message": "You must be logged in to perform this action."}
+    
+    if CURRENT_USER:
+        logger.info("Returning user profile from cache.")
+        return {"success": True, "data": CURRENT_USER}
+
     endpoint = f"{API_BASE_URL}/users/me"
     logger.info(f"Calling API: GET {endpoint} for user profile.")
     try:
         response = requests.get(endpoint, headers=_get_auth_headers(), timeout=10)
-        return _handle_response(response, "get_user_profile")
+        result = _handle_response(response, "get_user_profile")
+        if not result.get("error"):
+            CURRENT_USER = result.get("data")
+        return result
     except requests.exceptions.Timeout:
         logger.error(f"Timeout calling {endpoint}")
         return {"error": True, "message": "API request timed out for get_user_profile."}
 
+def get_current_user_data() -> dict:
+    """Returns the stored data for the currently logged-in user, if available."""
+    return CURRENT_USER
 
 def fetch_vehicle_specs(vin: str) -> dict:
     """Calls the Node.js API to get vehicle specifications by VIN."""
@@ -153,7 +184,7 @@ def submit_for_quote(payload: dict) -> dict:
     endpoint = f"{API_BASE_URL}/trucking/check/prices"
     logger.info(f"Calling API: POST {endpoint} with payload: {json.dumps(payload)[:200]}...") # Log truncated payload
     try:
-        response = requests.post(endpoint, json=payload, headers=COMMON_HEADERS, timeout=20) # Longer timeout for potential processing
+        response = requests.post(endpoint, json=payload, headers=_get_auth_headers(), timeout=20) # Longer timeout for potential processing
         # The actual quote ID is in a top-level "quote" field, not necessarily in the "data" field for this specific API.
         # The _handle_response will give us the parsed JSON. We let the tool layer extract the quote ID.
         return _handle_response(response, "submit_for_quote")

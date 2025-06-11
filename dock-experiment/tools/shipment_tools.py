@@ -4,6 +4,26 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+STATE_ABBREVIATIONS = {
+    'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR', 
+    'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE', 
+    'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID', 
+    'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS', 
+    'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD', 
+    'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS', 
+    'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV', 
+    'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY', 
+    'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK', 
+    'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC', 
+    'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT', 
+    'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV', 
+    'wisconsin': 'WI', 'wyoming': 'WY'
+}
+
+def _get_state_abbr(state_name: str) -> str:
+    """Converts a full state name to its 2-letter abbreviation, case-insensitively."""
+    return STATE_ABBREVIATIONS.get(state_name.lower(), state_name)
+
 def search_user_shipments(search_query: Optional[str] = None) -> dict:
     """Searches a logged-in user's shipments. A search query can be provided to filter results."""
     logger.info(f"Tool: search_user_shipments called with query: '{search_query}'.")
@@ -26,59 +46,76 @@ def search_user_bookings_advanced(
         done=is_completed
     )
 
-def book_shipment_order(
+def create_trucking_shipment(
     origin_city: str, origin_state: str, origin_zip: str,
     destination_city: str, destination_state: str, destination_zip: str,
     trailer_type: str,
-    vehicle_year: int, vehicle_make: str, vehicle_model: str, vehicle_type: str,
-    available_date: str,
+    vehicle_year: int, vehicle_make: str, vehicle_model: str,
+    available_date: str, # Format: "YYYY-MM-DD"
     offer_price: float,
     total_price: float,
     cod_amount: float,
-    cod_payment_method: str,
-    cod_payment_location: str,
-    origin_address1: str,
-    destination_address1: str,
+    vehicle_type: str = "SUV", # Default to 'SUV' if not provided
+    cod_payment_method: str = "CASH_CERTIFIED_FUNDS",
+    cod_payment_location: str = "Delivery",
+    origin_address1: Optional[str] = None,
+    destination_address1: Optional[str] = None,
     is_inoperable: bool = False,
-    origin_address2: Optional[str] = "",
-    destination_address2: Optional[str] = "",
-    origin_phone: Optional[str] = "N/A",
-    destination_phone: Optional[str] = "N/A",
-    origin_location_type: Optional[str] = "Residence",
-    destination_location_type: Optional[str] = "Residence",
+    origin_address2: Optional[str] = None,
+    destination_address2: Optional[str] = None,
+    origin_phone: Optional[str] = None,
+    destination_phone: Optional[str] = None,
+    origin_location_type: Optional[str] = None,
+    destination_location_type: Optional[str] = None,
     origin_forklift: bool = False,
     destination_forklift: bool = False,
-    pickup_instructions: Optional[str] = "",
+    pickup_instructions: Optional[str] = None,
     save_contact: bool = False,
     vehicle_qty: int = 1
 ) -> dict:
     """
-    Creates a new shipment booking order for the logged-in user. 
-    This should be called after a user agrees to a quote.
+    Creates a new trucking shipment. This is used to book a vehicle transport.
+    The agent should guide the user to collect all necessary information.
+    If a user provides a ZIP code, use the 'get_location_from_zip' tool to get city and state.
     """
-    logger.info(f"Tool: book_shipment_order called for {vehicle_year} {vehicle_make} {vehicle_model}.")
+    logger.info(f"Tool: create_trucking_shipment called for {vehicle_year} {vehicle_make} {vehicle_model}.")
+
+    origin_state_abbr = _get_state_abbr(origin_state)
+    destination_state_abbr = _get_state_abbr(destination_state)
+
+    origin = {
+        "city": origin_city,
+        "state": origin_state_abbr,
+        "zip": origin_zip,
+        "forklift": origin_forklift
+    }
+    if origin_address1:
+        origin["address1"] = origin_address1
+    if origin_address2:
+        origin["address2"] = origin_address2
+    if origin_phone:
+        origin["phone"] = origin_phone
+    if origin_location_type:
+        origin["LocationType"] = origin_location_type
+
+    destination = {
+        "city": destination_city,
+        "state": destination_state_abbr,
+        "zip": destination_zip,
+        "forklift": destination_forklift
+    }
+    if destination_address1:
+        destination["address1"] = destination_address1
+    if destination_address2:
+        destination["address2"] = destination_address2
+    if destination_phone:
+        destination["phone"] = destination_phone
+    if destination_location_type:
+        destination["LocationType"] = destination_location_type
     
     payload = {
-        "origin": {
-            "city": origin_city,
-            "state": origin_state,
-            "zip": origin_zip,
-            "adrress1": origin_address1,
-            "adrress2": origin_address2,
-            "phone": origin_phone,
-            "LocationType": origin_location_type,
-            "forklift": origin_forklift
-        },
-        "destination": {
-            "city": destination_city,
-            "state": destination_state,
-            "zip": destination_zip,
-            "adrress1": destination_address1,
-            "adrress2": destination_address2,
-            "phone": destination_phone,
-            "LocationType": destination_location_type,
-            "forklift": destination_forklift
-        },
+        "origin": origin,
+        "destination": destination,
         "trailerType": trailer_type,
         "vehicles": [
             {
@@ -91,8 +128,6 @@ def book_shipment_order(
         ],
         "availableDate": available_date, # "YYYY-MM-DD"
         "hasInOpvehicle": is_inoperable,
-        "PickupInstructions": pickup_instructions,
-        "offerPrice": offer_price,
         "saveContact": save_contact,
         "price": {
             "total": total_price,
@@ -103,6 +138,8 @@ def book_shipment_order(
             }
         }
     }
+    if pickup_instructions:
+        payload["PickupInstructions"] = pickup_instructions
 
     logger.debug(f"Submitting booking payload: {payload}")
     return node_api_service.create_trucking_order(payload) 

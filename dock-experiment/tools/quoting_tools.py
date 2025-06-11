@@ -8,15 +8,7 @@ def get_trucking_price_quote(
     delivery_city: str, delivery_state: str, delivery_zip: str, delivery_country: str,
     vehicle_year: str, vehicle_make: str, vehicle_model: str, 
     vehicle_type: str = "SUV", # Default or ask, ensure this matches API expectations or is derived
-    vehicle_operable: bool = True,
-    # Optional user details - decide if these should come from ADK session or be fixed for now
-    user_ip: str = "127.0.0.1", # Placeholder, ideally fetched dynamically if needed by API
-    user_firstname: str = "DockMind",
-    user_lastname: str = "User",
-    user_email: str = "quote@dockmind.ai",
-    user_country: str = "USA", # This seems to be a general user country in the API spec
-    user_state: str = "CA",   # General user state
-    user_city: str = "Anytown" # General user city
+    vehicle_operable: bool = True
 ) -> dict:
     """Gets a trucking price quote by providing pickup, delivery, and vehicle details."""
     logger.info(f"Tool: get_trucking_price_quote called with: PU: {pickup_city}/{pickup_zip}, Del: {delivery_city}/{delivery_zip}, Veh: {vehicle_year} {vehicle_make} {vehicle_model}")
@@ -36,44 +28,57 @@ def get_trucking_price_quote(
         logger.error(f"Invalid value for 'vehicle_operable', must be boolean.")
         return {"error": True, "message": "Invalid value for vehicle_operable, must be true or false."}
 
-    # The API spec for "offerPrice" and the top-level user geo fields (country, state, city) vs stopNumber fields is a bit ambiguous.
-    # Assuming top-level country, state, city are for the user/requester, and stopNumber details are specific to pickup/delivery.
+    # Dynamically set user details based on login state
+    current_user = node_api_service.get_current_user_data()
+    if current_user:
+        logger.info(f"User is logged in as {current_user.get('email')}. Using their details for the quote.")
+        user_firstname = current_user.get("firstname", "Registered")
+        user_lastname = current_user.get("lastname", "User")
+        user_email = current_user.get("email", "quote@dockmind.ai")
+        user_country = current_user.get("country", "USA")
+        user_state = current_user.get("state") # Let it be None if not present
+        user_city = current_user.get("city") # Let it be None if not present
+    else:
+        logger.info("User is not logged in. Using anonymous details for the quote.")
+        user_firstname = "DockMind"
+        user_lastname = "User"
+        user_email = "quote@dockmind.ai"
+        user_country = "USA"
+        user_state = "CA"
+        user_city = "Anytown"
+
     payload = {
-        "Ip": user_ip, 
+        "Ip": "127.0.0.1", 
         "firstname": user_firstname,
         "lastname": user_lastname,
         "email": user_email,
         "country": user_country, 
         "state": user_state,   
         "city": user_city,    
-        "offerPrice": "0", # Per API spec, seems to be a fixed string "0" or needs clarification
+        "offerPrice": "0",
         "stopNumber1": {
             "city": pickup_city,
             "state": pickup_state,
             "country": pickup_country,
             "code": pickup_zip
-            # "streetAddress1": "123 Pickup St", # Street address was commented out in API spec example
         },
         "stopNumber2": {
             "city": delivery_city,
             "state": delivery_state,
             "country": delivery_country,
             "code": delivery_zip
-            # "streetAddress1": "456 Delivery Ave", # Street address was commented out in API spec example
         },
         "vehicles": [
             {
                 "year": vehicle_year,
                 "make": vehicle_make,
                 "model": vehicle_model,
-                "vehicleType": vehicle_type, # e.g., "SUV"
+                "vehicleType": vehicle_type,
                 "operable": vehicle_operable,
-                "pickUpStopNumber": 1, # Fixed as per API structure
-                "dropOffStopNumber": 2 # Fixed as per API structure
+                "pickUpStopNumber": 1,
+                "dropOffStopNumber": 2
             }
         ]
-        # "enclosed": True, # Optional field from API spec example
-        # "limit": 4      # Optional field from API spec example
     }
     
     logger.debug(f"Submitting quote payload: {payload}")
@@ -82,8 +87,6 @@ def get_trucking_price_quote(
         logger.error(f"API error in submit_for_quote: {result.get('message')}")
     elif not result.get("quote"):
         logger.warning(f"submit_for_quote API response did not contain a 'quote' ID. Response: {result}")
-        # It might be good to return an error or a specific message if the quote ID is missing but no explicit API error occurred.
-        # For now, returning the result as is for the agent to interpret.
 
     return result
 
